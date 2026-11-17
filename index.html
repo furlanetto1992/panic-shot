@@ -29,6 +29,62 @@
 <div id="rotate">Gire o aparelho para a horizontal ↻</div>
 <div id="msg"></div>
 <script>
+  // ---- Audio for browsers -------------------------------------------------------------
+  // Unity tries to unlock audio on mousedown/touchstart, but phones only allow it on touchend/click.
+  // So the page keeps Unity's AudioContext and resumes it inside every real gesture; once it runs,
+  // the game restarts the music in sync (and learns the output latency for the rhythm clock).
+  var audioContexts = [], unityReady = null, resumePending = false;
+  function audioLatency(c) { return Math.round(((c.baseLatency || 0) + (c.outputLatency || 0)) * 1000); }
+  function notifyAudioRunning(c) {
+    var ms = String(audioLatency(c));
+    if (unityReady) { try { unityReady.SendMessage("PanicShotWebAudio", "OnWebAudioResumed", ms); } catch (e) {} }
+    else resumePending = ms;
+  }
+  (function () {
+    var Native = window.AudioContext || window.webkitAudioContext;
+    if (!Native) return;
+    function Tracked(options) {
+      var c = options ? new Native(options) : new Native();
+      audioContexts.push(c);
+      c.addEventListener("statechange", function () { if (c.state === "running") notifyAudioRunning(c); });
+      return c;
+    }
+    Tracked.prototype = Native.prototype;
+    window.AudioContext = Tracked;
+    if (window.webkitAudioContext) window.webkitAudioContext = Tracked;
+  })();
+  var silentMedia = null;
+  var isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  function unlockAudio() {
+    // iOS 17+: play through the ringer/silent switch like a game or video would.
+    try { if (navigator.audioSession && navigator.audioSession.type !== "playback") navigator.audioSession.type = "playback"; } catch (e) {}
+    audioContexts.forEach(function (c) {
+      if (c.state === "closed") return;
+      if (c.state !== "running") { try { c.resume(); } catch (e) {} }
+      try { var b = c.createBuffer(1, 1, 22050), src = c.createBufferSource(); src.buffer = b; src.connect(c.destination); src.start(0); } catch (e) {}
+    });
+    // Older iOS: a silent looping media element puts the page in "playback" mode (also ignores the silent switch).
+    if (isIOS && !navigator.audioSession) {
+      if (!silentMedia) { silentMedia = document.createElement("audio"); silentMedia.setAttribute("x-webkit-airplay", "deny"); silentMedia.loop = true; silentMedia.src = "data:audio/wav;base64,UklGRvQHAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YdAHAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA=="; }
+      if (silentMedia.paused) { var p = silentMedia.play(); if (p && p.catch) p.catch(function () {}); }
+    }
+  }
+  ["touchend", "pointerup", "click", "keydown", "mousedown", "touchstart"].forEach(function (e) { document.addEventListener(e, unlockAudio, { capture: true, passive: true }); });
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) audioContexts.forEach(function (c) { if (c.state === "suspended") { try { c.resume(); } catch (e) {} } }); });
+  // Test aid: open the page with ?audiodebug and call __audioLevel() in the console to read the real output level.
+  if (/audiodebug/.test(location.search)) {
+    var taps = new Map(), connect = AudioNode.prototype.connect;
+    AudioNode.prototype.connect = function (dest) {
+      var r = connect.apply(this, arguments);
+      try { if (dest instanceof AudioDestinationNode) { var a = taps.get(dest.context); if (!a) { a = dest.context.createAnalyser(); a.fftSize = 2048; taps.set(dest.context, a); } connect.call(this, a); } } catch (e) {}
+      return r;
+    };
+    window.__audioLevel = function () {
+      var out = []; taps.forEach(function (a, c) { var d = new Float32Array(a.fftSize); a.getFloatTimeDomainData(d); var s = 0; for (var i = 0; i < d.length; i++) s += d[i] * d[i]; out.push({ state: c.state, rms: Math.sqrt(s / d.length), latencyMs: audioLatency(c) }); });
+      return out;
+    };
+  }
+  // ----------------------------------------------------------------------------------------
   var canvas = document.getElementById("unity-canvas");
   function showBanner(text, type) {
     var box = document.getElementById("msg");
@@ -72,7 +128,9 @@
       return createUnityInstance(canvas, config, function (p) {
         document.getElementById("fill").style.width = Math.round(70 + p * 30) + "%";
       });
-    }).then(function () {
+    }).then(function (instance) {
+      unityReady = instance;
+      if (resumePending !== false) { try { instance.SendMessage("PanicShotWebAudio", "OnWebAudioResumed", resumePending); } catch (e) {} resumePending = false; }
       document.getElementById("loading").style.display = "none";
       document.body.classList.add("started");
       canvas.focus();
