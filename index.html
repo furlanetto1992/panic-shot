@@ -37,8 +37,12 @@
   function audioLatency(c) { return Math.round(((c.baseLatency || 0) + (c.outputLatency || 0)) * 1000); }
   function notifyAudioRunning(c) {
     var ms = String(audioLatency(c));
-    if (unityReady) { try { unityReady.SendMessage("PanicShotWebAudio", "OnWebAudioResumed", ms); } catch (e) {} }
-    else resumePending = ms;
+    // Wait until Unity's own resume handler has run (it replays queued sounds), then restart the music cleanly.
+    setTimeout(function () {
+      if (c.state !== "running") return;
+      if (unityReady) { try { unityReady.SendMessage("PanicShotWebAudio", "OnWebAudioResumed", ms); } catch (e) {} }
+      else resumePending = ms;
+    }, 150);
   }
   (function () {
     var Native = window.AudioContext || window.webkitAudioContext;
